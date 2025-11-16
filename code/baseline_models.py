@@ -19,9 +19,11 @@ from sklearn.metrics import (
 try:
     from xgboost import XGBClassifier
     XGBOOST_AVAILABLE = True
-except ImportError:
+except (ImportError, Exception) as e:
     XGBOOST_AVAILABLE = False
-    print("⚠️  XGBoost not installed. Install with: pip install xgboost")
+    print(f"⚠️  XGBoost not available: {type(e).__name__}")
+    print("   Proceeding with Logistic Regression and Random Forest only")
+    print("   (To enable XGBoost on macOS: brew install libomp)")
 
 from pathlib import Path
 import pickle
@@ -107,7 +109,8 @@ class BaselineModels:
     def train_xgboost(self):
         """Train XGBoost baseline"""
         if not XGBOOST_AVAILABLE:
-            print("\n⚠️  XGBoost skipped (not installed)")
+            print("\n⚠️  XGBoost skipped - OpenMP not available")
+            print("   To fix: brew install libomp")
             return None
         
         print("\n" + "="*60)
