@@ -1,697 +1,1647 @@
 """
 AI-Based Natural Disaster Prediction Web App
-Streamlit Interface for Real-time Flood Risk Prediction
+Streamlit application for real-time flood prediction in KP, Pakistan
+
+Features:
+- Real-time weather data integration
+- Flood risk prediction using trained ML models
+- Interactive maps and visualizations
+- Historical data analysis
+- Alert system for high-risk predictions
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import matplotlib.pyplot as plt
-import seaborn as sns
+import json
+import requests
 from datetime import datetime, timedelta
-import warnings
-warnings.filterwarnings('ignore')
+from pathlib import Path
+import os
 
-# ============================================================================
-# PAGE CONFIGURATION
-# ============================================================================
+# Try to import plotly, provide fallback
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+
+# Page configuration
 st.set_page_config(
-    page_title="Flood Risk Predictor",
+    page_title="Flood Prediction System - KP Pakistan",
     page_icon="🌊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ============================================================================
-# CUSTOM CSS
-# ============================================================================
-st.markdown("""
-    <style>
-    .main {
-        padding: 0rem 0rem;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-    }
-    .success-card {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-    }
-    .danger-card {
-        background: linear-gradient(135deg, #ff9a56 0%, #ff6a88 100%);
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-    }
-    .header-main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 30px;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin-bottom: 30px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# Define paths
+PROJECT_ROOT = Path(__file__).parent
+RESULTS_DIR = PROJECT_ROOT / "results"
+DATA_DIR = PROJECT_ROOT / "data" / "processed"
+MODELS_DIR = RESULTS_DIR
 
-# ============================================================================
-# LOAD MODELS
-# ============================================================================
-@st.cache_resource
-def load_models():
-    """Load trained models from pickle files"""
-    try:
-        with open('results/logistic_regression_model.pkl', 'rb') as f:
-            lr_model = pickle.load(f)
-        with open('results/random_forest_model.pkl', 'rb') as f:
-            rf_model = pickle.load(f)
-        return lr_model, rf_model
-    except Exception as e:
-        st.error(f"Error loading models: {e}")
-        return None, None
+# Location configurations
+LOCATIONS = {
+    "swat": {
+        "name": "Swat District, KP",
+        "latitude": 34.8091,
+        "longitude": 72.3617,
+        "elevation": 980,
+        "location_id": 0
+    },
+    "upper_dir": {
+        "name": "Upper Dir District, KP", 
+        "latitude": 35.3350,
+        "longitude": 71.8760,
+        "elevation": 1420,
+        "location_id": 1
+    }
+}
+
+# OpenWeatherMap API
+try:
+    OPENWEATHER_API_KEY = st.secrets.get("OPENWEATHER_API_KEY", "demo")
+except:
+    OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "demo")
+
 
 @st.cache_resource
-def load_test_data():
-    """Load test data for reference"""
-    try:
-        test_data = pd.read_csv('results/test_data.csv')
-        return test_data
-    except Exception as e:
-        st.error(f"Error loading test data: {e}")
-        return None
+def load_model():
+    """Load the trained flood prediction model"""
+    model_paths = [
+        MODELS_DIR / "best_flood_model.pkl",
+        MODELS_DIR / "random_forest_model.pkl",
+        MODELS_DIR / "logistic_regression_model.pkl"
+    ]
+    
+    for path in model_paths:
+        if path.exists():
+            try:
+                with open(path, 'rb') as f:
+                    model_data = pickle.load(f)
+                return model_data
+            except Exception as e:
+                st.warning(f"Could not load {path.name}: {e}")
+    
+    return None
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
-def get_feature_ranges(test_data):
-    """Get min/max ranges for each feature"""
-    feature_stats = {}
-    for col in test_data.columns:
-        if col != 'flood_event':
-            feature_stats[col] = {
-                'min': test_data[col].min(),
-                'max': test_data[col].max(),
-                'mean': test_data[col].mean(),
-                'std': test_data[col].std()
+
+@st.cache_data(ttl=1800)
+def fetch_weather_data(lat, lon, api_key):
+    """Fetch current weather from OpenWeatherMap API"""
+    if api_key == "demo":
+        # Return demo data for testing
+        return generate_demo_weather()
+    
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/weather"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": api_key,
+            "units": "metric"
+        }
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "tavg": data["main"]["temp"],
+                "tmin": data["main"]["temp_min"],
+                "tmax": data["main"]["temp_max"],
+                "humidity": data["main"]["humidity"],
+                "pres": data["main"]["pressure"],
+                "wspd": data["wind"]["speed"] * 3.6,  # m/s to km/h
+                "prcp": data.get("rain", {}).get("1h", 0),
+                "description": data["weather"][0]["description"],
+                "icon": data["weather"][0]["icon"]
             }
-    return feature_stats
+    except Exception as e:
+        st.warning(f"API error: {e}. Using demo data.")
+    
+    return generate_demo_weather()
 
-def create_sample_data(feature_dict):
-    """Create a DataFrame from feature inputs"""
-    return pd.DataFrame([feature_dict])
 
-def get_prediction(model, features_df):
-    """Get prediction and probability from model"""
-    prediction = model.predict(features_df)[0]
-    probability = model.predict_proba(features_df)[0]
-    return prediction, probability
+@st.cache_data(ttl=3600)
+def fetch_weather_forecast(lat, lon, api_key, target_date):
+    """Fetch weather forecast for a specific future date from OpenWeatherMap API"""
+    if api_key == "demo":
+        return generate_demo_weather_for_date(target_date), "Demo Mode (No API Key)"
+    
+    try:
+        # OpenWeatherMap 5-day/3-hour forecast API
+        url = "https://api.openweathermap.org/data/2.5/forecast"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": api_key,
+            "units": "metric"
+        }
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            forecasts = data.get("list", [])
+            
+            # Find forecasts for the target date
+            target_str = target_date.strftime("%Y-%m-%d")
+            day_forecasts = [f for f in forecasts if target_str in f["dt_txt"]]
+            
+            if day_forecasts:
+                # Aggregate data from all forecasts for that day
+                temps = [f["main"]["temp"] for f in day_forecasts]
+                temp_mins = [f["main"]["temp_min"] for f in day_forecasts]
+                temp_maxs = [f["main"]["temp_max"] for f in day_forecasts]
+                humidities = [f["main"]["humidity"] for f in day_forecasts]
+                pressures = [f["main"]["pressure"] for f in day_forecasts]
+                wind_speeds = [f["wind"]["speed"] * 3.6 for f in day_forecasts]  # m/s to km/h
+                
+                # Sum precipitation (rain in last 3h)
+                total_prcp = sum(f.get("rain", {}).get("3h", 0) for f in day_forecasts)
+                
+                # Get the most common weather description
+                descriptions = [f["weather"][0]["description"] for f in day_forecasts]
+                most_common_desc = max(set(descriptions), key=descriptions.count)
+                
+                return {
+                    "tavg": np.mean(temps),
+                    "tmin": min(temp_mins),
+                    "tmax": max(temp_maxs),
+                    "humidity": np.mean(humidities),
+                    "pres": np.mean(pressures),
+                    "wspd": np.mean(wind_speeds),
+                    "prcp": total_prcp,
+                    "description": most_common_desc,
+                    "icon": day_forecasts[0]["weather"][0]["icon"],
+                    "forecast_count": len(day_forecasts)
+                }, f"OpenWeatherMap Forecast ({len(day_forecasts)} readings)"
+            else:
+                # Date is beyond 5-day forecast range
+                return None, "Date beyond 5-day forecast range"
+        else:
+            return generate_demo_weather_for_date(target_date), f"API Error ({response.status_code}) - Using Demo"
+            
+    except Exception as e:
+        return generate_demo_weather_for_date(target_date), f"API Error: {str(e)[:50]} - Using Demo"
 
-def get_risk_level(probability):
-    """Convert probability to risk level"""
-    flood_prob = probability[1]
-    if flood_prob < 0.3:
-        return "🟢 LOW RISK", flood_prob, "#00cc00"
-    elif flood_prob < 0.6:
-        return "🟡 MEDIUM RISK", flood_prob, "#ffcc00"
+
+def generate_demo_weather_for_date(target_date):
+    """Generate realistic demo weather data for a specific date"""
+    month = target_date.month
+    
+    # Seasonal variations for KP Pakistan
+    if month in [6, 7, 8]:  # Monsoon - HIGH RISK
+        temp_base, prcp_base, humidity_base = 28, 25, 75
+    elif month in [9]:  # Post monsoon
+        temp_base, prcp_base, humidity_base = 24, 15, 65
+    elif month in [12, 1, 2]:  # Winter
+        temp_base, prcp_base, humidity_base = 5, 5, 50
+    elif month in [3, 4, 5]:  # Spring
+        temp_base, prcp_base, humidity_base = 18, 8, 55
+    else:  # Fall
+        temp_base, prcp_base, humidity_base = 20, 10, 60
+    
+    # Add some randomness
+    np.random.seed(target_date.toordinal())  # Consistent for same date
+    
+    return {
+        "tavg": temp_base + np.random.uniform(-3, 3),
+        "tmin": temp_base - 5 + np.random.uniform(-2, 2),
+        "tmax": temp_base + 5 + np.random.uniform(-2, 2),
+        "humidity": humidity_base + np.random.uniform(-10, 15),
+        "pres": 1010 + np.random.uniform(-15, 15),
+        "wspd": 10 + np.random.uniform(-5, 15),
+        "prcp": prcp_base + np.random.uniform(0, 20),
+        "description": "Demo forecast - simulated data",
+        "icon": "03d"
+    }
+
+
+def generate_demo_weather():
+    """Generate realistic demo weather data"""
+    month = datetime.now().month
+    # Seasonal variations for KP Pakistan
+    if month in [6, 7, 8]:  # Monsoon
+        temp_base, prcp_base = 28, 25
+    elif month in [12, 1, 2]:  # Winter
+        temp_base, prcp_base = 5, 5
     else:
-        return "🔴 HIGH RISK", flood_prob, "#ff0000"
+        temp_base, prcp_base = 18, 10
+    
+    return {
+        "tavg": temp_base + np.random.uniform(-3, 3),
+        "tmin": temp_base - 5 + np.random.uniform(-2, 2),
+        "tmax": temp_base + 5 + np.random.uniform(-2, 2),
+        "humidity": 60 + np.random.uniform(-20, 30),
+        "pres": 1010 + np.random.uniform(-15, 15),
+        "wspd": 10 + np.random.uniform(-5, 15),
+        "prcp": prcp_base + np.random.uniform(0, 20),
+        "description": "Demo mode - scattered clouds",
+        "icon": "03d"
+    }
 
-# ============================================================================
-# HEADER
-# ============================================================================
-st.markdown("""
-    <div class="header-main">
-        <h1>🌊 AI-Based Flood Risk Prediction System</h1>
-        <p>Khyber Pakhtunkhwa - Real-time Weather Analysis</p>
-        <p style="font-size: 14px; margin-top: 10px;">
-            Predicting flood risks in Swat and Upper Dir districts using advanced machine learning
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
 
-# ============================================================================
-# LOAD MODELS AND DATA
-# ============================================================================
-lr_model, rf_model = load_models()
-test_data = load_test_data()
+def prepare_features(weather_data, location_id):
+    """Prepare features for model prediction"""
+    now = datetime.now()
+    prcp = weather_data.get('prcp', 0)
+    humidity = weather_data.get('humidity', 60)
+    
+    features = {
+        'tavg': weather_data.get('tavg', 20),
+        'tmin': weather_data.get('tmin', 15),
+        'tmax': weather_data.get('tmax', 25),
+        'prcp': prcp,
+        'wspd': weather_data.get('wspd', 10),
+        'wpgt': weather_data.get('wspd', 10) * 1.5,  # Estimated gust
+        'pres': weather_data.get('pres', 1010),
+        'humidity': humidity,
+        'solar_radiation': 15 + np.random.uniform(-5, 10),
+        'month': now.month,
+        'day_of_year': now.timetuple().tm_yday,
+        'quarter': (now.month - 1) // 3 + 1,
+        'is_monsoon': 1 if now.month in [6, 7, 8, 9] else 0,
+        'temp_range': weather_data.get('tmax', 25) - weather_data.get('tmin', 15),
+        'high_humidity': 1 if humidity > 70 else 0,
+        'pressure_anomaly': weather_data.get('pres', 1010) - 1013,
+        'prcp_7day_avg': prcp * 0.8,
+        'prcp_3day_sum': prcp * 2.5,
+        'prcp_7day_sum': prcp * 5,
+        'heavy_rain': 1 if prcp > 10 else 0,
+        'extreme_rain': 1 if prcp > 50 else 0,
+        'tavg_7day_avg': weather_data.get('tavg', 20),
+        'wspd_7day_avg': weather_data.get('wspd', 10),
+        'location_encoded': location_id
+    }
+    
+    return pd.DataFrame([features])
 
-if lr_model is None or rf_model is None or test_data is None:
-    st.error("❌ Failed to load models or test data. Please check if files exist in results/ directory.")
-    st.stop()
 
-feature_stats = get_feature_ranges(test_data)
+def predict_flood_risk(model_data, features):
+    """Make flood prediction using trained model"""
+    if model_data is None:
+        return 0.1, "No model available"
+    
+    try:
+        # Handle both dict format and direct model object
+        if isinstance(model_data, dict):
+            model = model_data.get('model', model_data)
+            threshold = model_data.get('threshold', 0.5)
+        else:
+            # model_data is the model itself
+            model = model_data
+            threshold = 0.5
+        
+        # Get prediction probability
+        if hasattr(model, 'predict_proba'):
+            proba = model.predict_proba(features)[0][1]
+        else:
+            proba = float(model.predict(features)[0])
+        
+        # Determine risk level
+        if proba >= 0.7:
+            risk_level = "HIGH"
+        elif proba >= 0.4:
+            risk_level = "MODERATE"
+        elif proba >= 0.2:
+            risk_level = "LOW"
+        else:
+            risk_level = "VERY LOW"
+        
+        return proba, risk_level
+    except Exception as e:
+        st.error(f"Prediction error: {e}")
+        return 0.1, "Error"
 
-# ============================================================================
-# SIDEBAR
-# ============================================================================
-st.sidebar.title("📊 Navigation")
-app_mode = st.sidebar.radio(
-    "Select Mode:",
-    ["🏠 Home", "🎯 Make Prediction", "📈 Model Performance", "📊 Data Analysis", "ℹ️ About"]
-)
 
-# ============================================================================
-# PAGE: HOME
-# ============================================================================
-if app_mode == "🏠 Home":
-    col1, col2 = st.columns(2)
+def create_gauge_chart(probability, risk_level):
+    """Create a gauge chart for flood risk"""
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    colors = {
+        "VERY LOW": "#2ecc71",
+        "LOW": "#f39c12",
+        "MODERATE": "#e67e22",
+        "HIGH": "#e74c3c"
+    }
+    
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=probability * 100,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': f"Flood Risk: {risk_level}", 'font': {'size': 24}},
+        delta={'reference': 30, 'increasing': {'color': "red"}},
+        gauge={
+            'axis': {'range': [0, 100], 'tickwidth': 1},
+            'bar': {'color': colors.get(risk_level, "#3498db")},
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, 20], 'color': '#2ecc71'},
+                {'range': [20, 40], 'color': '#f39c12'},
+                {'range': [40, 70], 'color': '#e67e22'},
+                {'range': [70, 100], 'color': '#e74c3c'}
+            ],
+            'threshold': {
+                'line': {'color': "black", 'width': 4},
+                'thickness': 0.75,
+                'value': probability * 100
+            }
+        }
+    ))
+    
+    fig.update_layout(height=300)
+    return fig
+
+
+def main():
+    """Main application function"""
+    
+    # Sidebar
+    st.sidebar.title("🌊 Flood Prediction")
+    st.sidebar.markdown("---")
+    
+    # Location selection
+    selected_location = st.sidebar.selectbox(
+        "Select Location",
+        options=list(LOCATIONS.keys()),
+        format_func=lambda x: LOCATIONS[x]["name"]
+    )
+    
+    location = LOCATIONS[selected_location]
+    
+    # Navigation
+    st.sidebar.markdown("### 📊 Main Features")
+    page = st.sidebar.radio(
+        "Navigation",
+        ["🏠 Dashboard", "🔮 Custom Prediction", "📊 Historical Data", "🤖 Model Info", "ℹ️ About"]
+    )
+    
+    # AI Techniques Section
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🧠 AI Techniques")
+    ai_page = st.sidebar.radio(
+        "AI Modules",
+        ["None", "🔍 Search Algorithms", "🧩 CSP Resource Allocation", "🧬 Neural Network (LSTM)", 
+         "📈 K-Means Clustering", "🎮 Reinforcement Learning", "🔬 SHAP Explainability"]
+    )
+    
+    # Load model
+    model_data = load_model()
+    
+    # Route to appropriate page
+    if ai_page != "None":
+        if ai_page == "🔍 Search Algorithms":
+            show_search_algorithms()
+        elif ai_page == "🧩 CSP Resource Allocation":
+            show_csp_page()
+        elif ai_page == "🧬 Neural Network (LSTM)":
+            show_neural_network_page()
+        elif ai_page == "📈 K-Means Clustering":
+            show_clustering_page()
+        elif ai_page == "🎮 Reinforcement Learning":
+            show_reinforcement_learning_page()
+        elif ai_page == "🔬 SHAP Explainability":
+            show_explainability_page(model_data)
+    elif page == "🏠 Dashboard":
+        show_dashboard(location, model_data)
+    elif page == "🔮 Custom Prediction":
+        show_custom_prediction(location, model_data)
+    elif page == "📊 Historical Data":
+        show_historical_data(location)
+    elif page == "🤖 Model Info":
+        show_model_info(model_data)
+    else:
+        show_about()
+
+
+def show_dashboard(location, model_data):
+    """Display main dashboard"""
+    st.title(f"🌊 Flood Risk Dashboard - {location['name']}")
+    
+    # Current weather
+    st.subheader("📡 Current Weather Conditions")
+    
+    weather = fetch_weather_data(
+        location['latitude'], 
+        location['longitude'],
+        OPENWEATHER_API_KEY
+    )
+    
+    # Weather metrics
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown("### 📌 Quick Start Guide")
-        st.info("""
-        **Welcome to the Flood Risk Predictor!**
-        
-        This application uses machine learning to predict flood risks in 
-        Khyber Pakhtunkhwa province.
-        
-        **Features:**
-        - ✅ Real-time flood risk prediction
-        - ✅ Weather-based analysis
-        - ✅ Model performance metrics
-        - ✅ Historical data analysis
-        """)
-    
+        st.metric("🌡️ Temperature", f"{weather['tavg']:.1f}°C")
     with col2:
-        st.markdown("### 📊 System Statistics")
-        col_a, col_b, col_c = st.columns(3)
-        
-        with col_a:
-            st.metric("Test Samples", f"{len(test_data):,}", "Records")
-        
-        with col_b:
-            st.metric("Features Used", "19", "Weather Variables")
-        
-        with col_c:
-            st.metric("Model Accuracy", "99.91%", "Test Set")
+        st.metric("💧 Humidity", f"{weather['humidity']:.0f}%")
+    with col3:
+        st.metric("🌧️ Precipitation", f"{weather['prcp']:.1f} mm")
+    with col4:
+        st.metric("💨 Wind Speed", f"{weather['wspd']:.1f} km/h")
     
     st.markdown("---")
     
-    col1, col2 = st.columns(2)
+    # Flood prediction
+    st.subheader("🎯 Flood Risk Prediction")
+    
+    features = prepare_features(weather, location['location_id'])
+    probability, risk_level = predict_flood_risk(model_data, features)
+    
+    col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.markdown("### 🤖 Models Available")
-        st.success("""
-        **1. Logistic Regression**
-        - AUC-ROC: 0.8243
-        - Fast predictions
-        - Good baseline model
-        
-        **2. Random Forest** ⭐
-        - AUC-ROC: 0.8643 (Better)
-        - 200 decision trees
-        - More accurate predictions
-        """)
+        gauge = create_gauge_chart(probability, risk_level)
+        if gauge:
+            st.plotly_chart(gauge, use_container_width=True)
+        else:
+            st.metric("Flood Risk", f"{probability*100:.1f}%", risk_level)
     
     with col2:
-        st.markdown("### 🌍 Coverage Areas")
-        st.info("""
-        **Regions:**
-        - 📍 Swat District
-        - 📍 Upper Dir District
+        st.markdown("### Risk Assessment")
         
-        **Weather Variables:**
-        - Temperature (avg, min, max)
-        - Precipitation
-        - Wind Speed & Gust
-        - Atmospheric Pressure
-        - Humidity
-        - Solar Radiation
-        - Rolling Averages (7-day)
-        """)
+        if risk_level == "HIGH":
+            st.error("⚠️ **HIGH RISK** - Take immediate precautions!")
+            st.markdown("""
+            - Monitor official alerts
+            - Prepare emergency supplies
+            - Know evacuation routes
+            - Stay away from rivers/streams
+            """)
+        elif risk_level == "MODERATE":
+            st.warning("⚡ **MODERATE RISK** - Stay alert!")
+            st.markdown("""
+            - Monitor weather updates
+            - Review emergency plans
+            - Secure outdoor items
+            """)
+        else:
+            st.success("✅ **LOW RISK** - Normal conditions")
+            st.markdown("""
+            - No immediate flood threat
+            - Continue normal activities
+            - Stay informed of weather changes
+            """)
+    
+    # API mode indicator
+    if OPENWEATHER_API_KEY == "demo":
+        st.info("🔧 Running in demo mode. Set OPENWEATHER_API_KEY for live weather data.")
 
-# ============================================================================
-# PAGE: MAKE PREDICTION
-# ============================================================================
-elif app_mode == "🎯 Make Prediction":
-    st.markdown("## 🎯 Real-time Flood Risk Prediction")
+
+def show_historical_data(location):
+    """Show historical flood data analysis"""
+    st.title("📊 Historical Data Analysis")
     
-    # Tabs for input methods
-    tab1, tab2, tab3 = st.tabs(["📝 Manual Input", "📂 Sample Data", "🎲 Random Data"])
+    # Load historical dataset
+    data_path = DATA_DIR / "flood_weather_dataset.csv"
     
-    # ========== TAB 1: Manual Input ==========
-    with tab1:
-        st.markdown("### Enter Weather Data")
+    if data_path.exists():
+        df = pd.read_csv(data_path, low_memory=False)
+        df['date'] = pd.to_datetime(df['date'])
         
-        col1, col2, col3 = st.columns(3)
+        # Filter by location - match location_key (swat or upper_dir)
+        loc_key = "swat" if "swat" in location['name'].lower() else "upper_dir"
+        loc_df = df[df['location_key'] == loc_key]
         
-        with col1:
-            tavg = st.slider("Average Temperature (°C)", 
-                            float(feature_stats['tavg']['min']), 
-                            float(feature_stats['tavg']['max']), 
-                            float(feature_stats['tavg']['mean']))
-            tmin = st.slider("Minimum Temperature (°C)", 
-                            float(feature_stats['tmin']['min']), 
-                            float(feature_stats['tmin']['max']), 
-                            float(feature_stats['tmin']['mean']))
-            tmax = st.slider("Maximum Temperature (°C)", 
-                            float(feature_stats['tmax']['min']), 
-                            float(feature_stats['tmax']['max']), 
-                            float(feature_stats['tmax']['mean']))
-            prcp = st.slider("Precipitation (mm)", 
-                            float(feature_stats['prcp']['min']), 
-                            float(feature_stats['prcp']['max']), 
-                            float(feature_stats['prcp']['mean']))
+        st.subheader(f"Data for {location['name']}")
+        st.write(f"📅 Date Range: {loc_df['date'].min().date()} to {loc_df['date'].max().date()}")
+        st.write(f"📊 Total Records: {len(loc_df)}")
         
-        with col2:
-            wspd = st.slider("Wind Speed (m/s)", 
-                            float(feature_stats['wspd']['min']), 
-                            float(feature_stats['wspd']['max']), 
-                            float(feature_stats['wspd']['mean']))
-            wpgt = st.slider("Wind Gust (m/s)", 
-                            float(feature_stats['wpgt']['min']), 
-                            float(feature_stats['wpgt']['max']), 
-                            float(feature_stats['wpgt']['mean']))
-            pres = st.slider("Atmospheric Pressure (hPa)", 
-                            float(feature_stats['pres']['min']), 
-                            float(feature_stats['pres']['max']), 
-                            float(feature_stats['pres']['mean']))
-            humidity = st.slider("Humidity (%)", 
-                                float(feature_stats['humidity']['min']), 
-                                float(feature_stats['humidity']['max']), 
-                                float(feature_stats['humidity']['mean']))
+        # Flood summary
+        flood_count = loc_df['flood_event'].sum()
+        st.write(f"🌊 Flood Events: {flood_count} ({flood_count/len(loc_df)*100:.2f}%)")
         
-        with col3:
-            solar_radiation = st.slider("Solar Radiation (MJ/m²)", 
-                                       float(feature_stats['solar_radiation']['min']), 
-                                       float(feature_stats['solar_radiation']['max']), 
-                                       float(feature_stats['solar_radiation']['mean']))
-            month = st.slider("Month (1-12)", 1, 12, 6)
-            day_of_year = st.slider("Day of Year (1-365)", 1, 365, 180)
-            quarter = st.slider("Quarter (1-4)", 1, 4, 2)
+        # Time series plot
+        if PLOTLY_AVAILABLE and len(loc_df) > 0:
+            # Precipitation chart
+            fig = px.line(loc_df, x='date', y='prcp', title='Precipitation Over Time (mm)')
+            fig.update_layout(xaxis_title="Date", yaxis_title="Precipitation (mm)")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Temperature chart
+            fig2 = px.line(loc_df, x='date', y=['tmin', 'tavg', 'tmax'], 
+                          title='Temperature Trends (°C)',
+                          labels={'value': 'Temperature (°C)', 'variable': 'Type'})
+            st.plotly_chart(fig2, use_container_width=True)
+            
+            # Flood events timeline
+            flood_df = loc_df[loc_df['flood_event'] == 1]
+            if len(flood_df) > 0:
+                st.subheader("🌊 Flood Events Timeline")
+                fig3 = px.scatter(flood_df, x='date', y='prcp', 
+                                 title='Flood Events (Precipitation on Flood Days)',
+                                 color_discrete_sequence=['red'])
+                fig3.update_traces(marker=dict(size=10))
+                st.plotly_chart(fig3, use_container_width=True)
+                
+                # List of flood events
+                with st.expander(f"📋 View All {len(flood_df)} Flood Events"):
+                    flood_display = flood_df[['date', 'prcp', 'tavg', 'humidity', 'flood_severity', 'flood_source']].copy()
+                    flood_display['date'] = flood_display['date'].dt.strftime('%Y-%m-%d')
+                    st.dataframe(flood_display, use_container_width=True)
         
-        col1, col2, col3 = st.columns(3)
+        # Show data table
+        with st.expander("View Raw Data (First 100 rows)"):
+            st.dataframe(loc_df.head(100))
+    else:
+        st.warning("Historical data not found. Please run the data pipeline first.")
+
+
+def show_model_info(model_data):
+    """Display model information and metrics"""
+    st.title("🤖 Model Information")
+    
+    # Load metrics
+    metrics_path = RESULTS_DIR / "improved_model_metrics.csv"
+    
+    if metrics_path.exists():
+        metrics_df = pd.read_csv(metrics_path)
         
-        with col1:
-            temp_range = tmax - tmin
-            st.metric("Temperature Range", f"{temp_range:.2f}°C", "Calculated")
+        st.subheader("📊 Model Performance Metrics")
+        st.dataframe(metrics_df)
         
-        with col2:
-            high_humidity = 1 if humidity > feature_stats['humidity']['mean'] else 0
-            st.metric("High Humidity", "Yes" if high_humidity else "No", "Based on avg")
+        # Best model info
+        if model_data:
+            st.subheader("🏆 Currently Loaded Model")
+            if isinstance(model_data, dict):
+                st.write(f"**Model:** {model_data.get('model_name', 'Unknown')}")
+                st.write(f"**Threshold:** {model_data.get('threshold', 0.5):.4f}")
+                
+                if 'metrics' in model_data:
+                    st.json(model_data['metrics'])
+    else:
+        st.warning("Metrics file not found. Please train the models first.")
+    
+    # Feature importance
+    st.subheader("📈 Feature Importance")
+    fi_path = RESULTS_DIR / "feature_importance.json"
+    if fi_path.exists():
+        with open(fi_path) as f:
+            importance = json.load(f)
+        st.json(importance)
+
+
+def show_custom_prediction(location, model_data):
+    """Allow users to enter custom weather features for prediction"""
+    st.title("🔮 Custom Flood Prediction")
+    st.markdown("Select a date to predict flood risk. **Tomorrow's forecast** is auto-fetched from weather API!")
+    
+    st.markdown("---")
+    
+    # Get today and tomorrow dates
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    
+    # Quick date selection buttons
+    st.markdown("### ⚡ Quick Date Selection")
+    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+    
+    with col_btn1:
+        if st.button("📅 Today", use_container_width=True):
+            st.session_state['selected_date'] = today
+    with col_btn2:
+        if st.button("🔮 Tomorrow", use_container_width=True, type="primary"):
+            st.session_state['selected_date'] = tomorrow
+    with col_btn3:
+        if st.button("📆 Day After", use_container_width=True):
+            st.session_state['selected_date'] = today + timedelta(days=2)
+    with col_btn4:
+        if st.button("📅 In 3 Days", use_container_width=True):
+            st.session_state['selected_date'] = today + timedelta(days=3)
+    
+    st.markdown("---")
+    
+    # Date and location selection
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        # Use session state if set, otherwise default to today
+        default_date = st.session_state.get('selected_date', today)
+        selected_date = st.date_input(
+            "📅 Select Date",
+            value=default_date,
+            min_value=datetime(2000, 1, 1),
+            max_value=datetime(2030, 12, 31)
+        )
+    with col2:
+        selected_loc = st.selectbox(
+            "📍 Location",
+            options=["Swat District", "Upper Dir District"],
+            index=0 if "swat" in location['name'].lower() else 1
+        )
+    with col3:
+        auto_fetch = st.checkbox("Auto-fetch", value=True, help="Automatically load weather data")
+    
+    # Determine if date is future or past
+    is_future_date = selected_date > today
+    is_within_forecast = selected_date <= today + timedelta(days=5)
+    
+    # Get location coordinates
+    loc_key = "swat" if "swat" in selected_loc.lower() else "upper_dir"
+    loc_info = LOCATIONS[loc_key]
+    
+    # Default values
+    tavg, tmin, tmax, prcp, humidity, pres, wspd, solar = 20.0, 15.0, 25.0, 5.0, 60.0, 1010.0, 10.0, 18.0
+    weather_source = "Manual Input"
+    actual_flood = None
+    forecast_info = None
+    
+    # Auto-fetch weather data
+    if auto_fetch:
+        if is_future_date and is_within_forecast:
+            # FUTURE DATE: Fetch weather forecast from API
+            st.info(f"🔮 **Future Date Selected** - Fetching weather forecast for {selected_date}...")
+            
+            forecast_data, source_msg = fetch_weather_forecast(
+                loc_info['latitude'],
+                loc_info['longitude'],
+                OPENWEATHER_API_KEY,
+                datetime.combine(selected_date, datetime.min.time())
+            )
+            
+            if forecast_data:
+                tavg = float(forecast_data.get('tavg', tavg))
+                tmin = float(forecast_data.get('tmin', tmin))
+                tmax = float(forecast_data.get('tmax', tmax))
+                prcp = float(forecast_data.get('prcp', prcp))
+                humidity = float(forecast_data.get('humidity', humidity))
+                pres = float(forecast_data.get('pres', pres))
+                wspd = float(forecast_data.get('wspd', wspd))
+                weather_source = source_msg
+                forecast_info = forecast_data.get('description', '')
+                
+                if selected_date == tomorrow:
+                    st.success(f"✅ **Tomorrow's Forecast Loaded!** Weather: {forecast_info}")
+                else:
+                    st.success(f"✅ Forecast loaded for {selected_date}. Weather: {forecast_info}")
+            else:
+                st.warning(f"⚠️ {source_msg}. Using estimated values based on historical patterns.")
+                weather_source = "Estimated (No Forecast)"
+                
+        elif is_future_date and not is_within_forecast:
+            # Date too far in future - use seasonal estimates
+            st.warning(f"⚠️ {selected_date} is beyond 5-day forecast. Using seasonal estimates.")
+            demo_data = generate_demo_weather_for_date(datetime.combine(selected_date, datetime.min.time()))
+            tavg = demo_data['tavg']
+            tmin = demo_data['tmin']
+            tmax = demo_data['tmax']
+            prcp = demo_data['prcp']
+            humidity = demo_data['humidity']
+            pres = demo_data['pres']
+            wspd = demo_data['wspd']
+            weather_source = f"Seasonal Estimate for {selected_date.strftime('%B')}"
+            
+        else:
+            # PAST/TODAY: Load from historical data
+            data_path = DATA_DIR / "flood_weather_dataset.csv"
+            if data_path.exists():
+                df = pd.read_csv(data_path, low_memory=False)
+                df['date'] = pd.to_datetime(df['date'])
+                
+                # Filter by date and location
+                matches = df[(df['date'].dt.date == selected_date) & (df['location_key'].str.contains(loc_key, case=False, na=False))]
+                
+                if len(matches) > 0:
+                    row = matches.iloc[0]
+                    tavg = float(row['tavg']) if pd.notna(row['tavg']) else tavg
+                    tmin = float(row['tmin']) if pd.notna(row['tmin']) else tmin
+                    tmax = float(row['tmax']) if pd.notna(row['tmax']) else tmax
+                    prcp = float(row['prcp']) if pd.notna(row['prcp']) else prcp
+                    humidity = float(row['humidity']) if pd.notna(row['humidity']) else humidity
+                    pres = float(row['pres']) if pd.notna(row['pres']) else pres
+                    wspd = float(row['wspd']) if pd.notna(row['wspd']) else wspd
+                    solar = float(row['solar_radiation']) if pd.notna(row['solar_radiation']) else solar
+                    actual_flood = int(row['flood_event']) if pd.notna(row['flood_event']) else None
+                    weather_source = f"Historical Data ({selected_date})"
+                    
+                    st.success(f"✅ Historical weather loaded for {selected_date}")
+                    if actual_flood == 1:
+                        st.error("🌊 **Note: This date had an actual flood event!**")
+                elif selected_date == today:
+                    # Today - fetch current weather
+                    current_weather = fetch_weather_data(
+                        loc_info['latitude'],
+                        loc_info['longitude'],
+                        OPENWEATHER_API_KEY
+                    )
+                    tavg = current_weather['tavg']
+                    tmin = current_weather['tmin']
+                    tmax = current_weather['tmax']
+                    prcp = current_weather['prcp']
+                    humidity = current_weather['humidity']
+                    pres = current_weather['pres']
+                    wspd = current_weather['wspd']
+                    weather_source = "Current Weather (Live)"
+                    st.success("✅ Today's live weather data loaded!")
+                else:
+                    st.warning(f"⚠️ No historical data for {selected_date}. Enter values manually.")
+                    weather_source = "Default Values (no data)"
+    
+    # Display date type indicator
+    if is_future_date:
+        st.markdown(f"### 🔮 **FORECAST MODE** - Predicting for {selected_date}")
+        if selected_date == tomorrow:
+            st.markdown("#### 🌅 Tomorrow's Flood Risk Prediction")
+    else:
+        st.markdown(f"### 📊 Weather Parameters for {selected_date}")
+    
+    st.caption(f"📡 Source: {weather_source}")
+    
+    # Weather inputs in columns (editable even when auto-fetched)
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        tavg = st.number_input("Average Temp (°C)", value=tavg, min_value=-20.0, max_value=50.0, step=0.5, key="tavg")
+        tmin = st.number_input("Min Temp (°C)", value=tmin, min_value=-30.0, max_value=45.0, step=0.5, key="tmin")
+        tmax = st.number_input("Max Temp (°C)", value=tmax, min_value=-10.0, max_value=55.0, step=0.5, key="tmax")
         
-        with col3:
-            pressure_anomaly = pres - feature_stats['pres']['mean']
-            st.metric("Pressure Anomaly", f"{pressure_anomaly:.2f} hPa", "From mean")
+    with col2:
+        prcp = st.number_input("Precipitation (mm)", value=prcp, min_value=0.0, max_value=500.0, step=1.0, key="prcp")
+        humidity = st.number_input("Humidity (%)", value=humidity, min_value=0.0, max_value=100.0, step=1.0, key="humidity")
+        pres = st.number_input("Pressure (hPa)", value=pres, min_value=70.0, max_value=1100.0, step=1.0, key="pres")
         
-        # Rolling averages
-        st.markdown("### 7-Day Rolling Averages")
-        col1, col2, col3 = st.columns(3)
+    with col3:
+        wspd = st.number_input("Wind Speed (km/h)", value=wspd, min_value=0.0, max_value=200.0, step=1.0, key="wspd")
+        solar = st.number_input("Solar Radiation (MJ/m²)", value=solar, min_value=0.0, max_value=40.0, step=0.5, key="solar")
+    
+    st.markdown("---")
+    
+    # Predict button - different text for future dates
+    button_text = "🔮 Predict Tomorrow's Flood Risk" if selected_date == tomorrow else "🔮 Predict Flood Risk"
+    
+    if st.button(button_text, type="primary", use_container_width=True):
+        # Prepare features
+        location_id = 0 if "swat" in selected_loc.lower() else 1
         
-        with col1:
-            prcp_7day_avg = st.slider("Precipitation 7-day avg (mm)", 
-                                     float(feature_stats['prcp_7day_avg']['min']), 
-                                     float(feature_stats['prcp_7day_avg']['max']), 
-                                     float(feature_stats['prcp_7day_avg']['mean']))
+        custom_weather = {
+            'tavg': tavg,
+            'tmin': tmin,
+            'tmax': tmax,
+            'prcp': prcp,
+            'humidity': humidity,
+            'pres': pres,
+            'wspd': wspd
+        }
         
-        with col2:
-            tavg_7day_avg = st.slider("Temperature 7-day avg (°C)", 
-                                     float(feature_stats['tavg_7day_avg']['min']), 
-                                     float(feature_stats['tavg_7day_avg']['max']), 
-                                     float(feature_stats['tavg_7day_avg']['mean']))
-        
-        with col3:
-            wspd_7day_avg = st.slider("Wind Speed 7-day avg (m/s)", 
-                                     float(feature_stats['wspd_7day_avg']['min']), 
-                                     float(feature_stats['wspd_7day_avg']['max']), 
-                                     float(feature_stats['wspd_7day_avg']['mean']))
-        
-        location = st.radio("Location:", ["Swat", "Upper Dir"], horizontal=True)
-        location_encoded = 1.0 if location == "Upper Dir" else -1.0
-        
-        # Create feature dictionary
+        # Create feature dataframe
         features = {
             'tavg': tavg,
             'tmin': tmin,
             'tmax': tmax,
             'prcp': prcp,
             'wspd': wspd,
-            'wpgt': wpgt,
+            'wpgt': wspd * 1.5,
             'pres': pres,
             'humidity': humidity,
-            'solar_radiation': solar_radiation,
-            'month': month,
-            'day_of_year': day_of_year,
-            'quarter': quarter,
-            'temp_range': temp_range,
-            'high_humidity': high_humidity,
-            'pressure_anomaly': pressure_anomaly,
-            'prcp_7day_avg': prcp_7day_avg,
-            'tavg_7day_avg': tavg_7day_avg,
-            'wspd_7day_avg': wspd_7day_avg,
-            'location_encoded': location_encoded
+            'solar_radiation': solar,
+            'month': selected_date.month,
+            'day_of_year': selected_date.timetuple().tm_yday,
+            'quarter': (selected_date.month - 1) // 3 + 1,
+            'is_monsoon': 1 if selected_date.month in [6, 7, 8, 9] else 0,
+            'temp_range': tmax - tmin,
+            'high_humidity': 1 if humidity > 70 else 0,
+            'pressure_anomaly': pres - 1013,
+            'prcp_7day_avg': prcp * 0.8,
+            'prcp_3day_sum': prcp * 2.5,  # Estimate 3-day accumulation
+            'prcp_7day_sum': prcp * 5,    # Estimate 7-day accumulation
+            'heavy_rain': 1 if prcp > 10 else 0,
+            'extreme_rain': 1 if prcp > 50 else 0,
+            'tavg_7day_avg': tavg,
+            'wspd_7day_avg': wspd,
+            'location_encoded': location_id
         }
         
-        if st.button("🔮 Predict Flood Risk", use_container_width=True):
-            features_df = create_sample_data(features)
-            
-            # Get predictions
-            lr_pred, lr_prob = get_prediction(lr_model, features_df)
-            rf_pred, rf_prob = get_prediction(rf_model, features_df)
-            
-            # Display results
-            st.markdown("---")
-            st.markdown("### 📊 Prediction Results")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 🤖 Logistic Regression")
-                lr_risk, lr_flood_prob, lr_color = get_risk_level(lr_prob)
-                st.markdown(f"<div style='background: {lr_color}; padding: 20px; border-radius: 10px; color: white; text-align: center;'><h2>{lr_risk}</h2><h3>{lr_flood_prob:.2%}</h3></div>", unsafe_allow_html=True)
-                
-                with st.expander("📈 Detailed Probabilities"):
-                    st.metric("Probability of No Flood", f"{lr_prob[0]:.4f}")
-                    st.metric("Probability of Flood", f"{lr_prob[1]:.4f}")
-            
-            with col2:
-                st.markdown("#### 🌲 Random Forest (Recommended)")
-                rf_risk, rf_flood_prob, rf_color = get_risk_level(rf_prob)
-                st.markdown(f"<div style='background: {rf_color}; padding: 20px; border-radius: 10px; color: white; text-align: center;'><h2>{rf_risk}</h2><h3>{rf_flood_prob:.2%}</h3></div>", unsafe_allow_html=True)
-                
-                with st.expander("📈 Detailed Probabilities"):
-                    st.metric("Probability of No Flood", f"{rf_prob[0]:.4f}")
-                    st.metric("Probability of Flood", f"{rf_prob[1]:.4f}")
-            
-            # Summary
-            st.markdown("---")
-            st.markdown("### 📋 Input Summary")
-            summary_df = pd.DataFrame({
-                'Feature': list(features.keys()),
-                'Value': list(features.values())
-            })
-            st.dataframe(summary_df, use_container_width=True)
-    
-    # ========== TAB 2: Sample Data ==========
-    with tab2:
-        st.markdown("### Use Sample Data from Test Set")
+        features_df = pd.DataFrame([features])
         
-        sample_index = st.slider("Select Sample #:", 0, len(test_data)-1, 0)
-        sample_data = test_data.iloc[sample_index]
+        # Make prediction
+        probability, risk_level = predict_flood_risk(model_data, features_df)
         
-        col1, col2 = st.columns([1, 1])
+        # Display results
+        st.markdown("### 📊 Prediction Results")
+        
+        col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.markdown("#### 📊 Selected Sample Data")
-            st.dataframe(sample_data.drop('flood_event'), use_container_width=True)
+            gauge = create_gauge_chart(probability, risk_level)
+            if gauge:
+                st.plotly_chart(gauge, use_container_width=True)
+            else:
+                st.metric("Flood Risk Probability", f"{probability*100:.1f}%")
         
         with col2:
-            st.markdown("#### 📝 Actual Result")
-            actual_label = "🚨 FLOOD EVENT" if sample_data['flood_event'] == 1 else "✅ NO FLOOD"
-            st.success(actual_label if sample_data['flood_event'] == 0 else st.error(actual_label))
+            st.markdown(f"### Risk Level: **{risk_level}**")
+            st.markdown(f"**Date:** {selected_date}")
+            st.markdown(f"**Location:** {selected_loc}")
+            st.markdown(f"**Probability:** {probability*100:.2f}%")
+            
+            if risk_level == "HIGH":
+                st.error("⚠️ High flood risk! Take precautions.")
+            elif risk_level == "MODERATE":
+                st.warning("⚡ Moderate risk. Stay alert.")
+            else:
+                st.success("✅ Low risk conditions.")
+            
+            # Show actual vs predicted if we have historical data
+            if actual_flood is not None:
+                st.markdown("---")
+                st.markdown("**Model Validation:**")
+                predicted_flood = 1 if risk_level in ["HIGH", "MODERATE"] else 0
+                if actual_flood == 1 and predicted_flood == 1:
+                    st.success("✅ Correct! Model predicted flood, and flood occurred.")
+                elif actual_flood == 0 and predicted_flood == 0:
+                    st.success("✅ Correct! Model predicted no flood, and none occurred.")
+                elif actual_flood == 1 and predicted_flood == 0:
+                    st.error("❌ Missed! Flood occurred but model predicted low risk.")
+                else:
+                    st.warning("⚠️ False alarm. Model predicted risk but no flood occurred.")
         
-        if st.button("🔮 Predict this Sample", use_container_width=True):
-            features_df = sample_data.drop('flood_event').to_frame().T
-            
-            lr_pred, lr_prob = get_prediction(lr_model, features_df)
-            rf_pred, rf_prob = get_prediction(rf_model, features_df)
-            
+        # Special message for tomorrow's prediction
+        if selected_date == tomorrow:
             st.markdown("---")
-            st.markdown("### 📊 Prediction Results")
+            st.markdown("### 🌅 Tomorrow's Forecast Summary")
+            if risk_level == "HIGH":
+                st.error(f"""
+                ⚠️ **HIGH FLOOD RISK TOMORROW ({tomorrow})**
+                
+                Based on weather forecast:
+                - Expected precipitation: **{prcp:.1f} mm**
+                - Temperature: **{tavg:.1f}°C**
+                - Humidity: **{humidity:.0f}%**
+                
+                **RECOMMENDED ACTIONS:**
+                - Monitor official alerts closely
+                - Prepare emergency supplies
+                - Know your evacuation routes
+                - Stay away from rivers and streams
+                """)
+            elif risk_level == "MODERATE":
+                st.warning(f"""
+                ⚡ **MODERATE FLOOD RISK TOMORROW ({tomorrow})**
+                
+                Based on weather forecast:
+                - Expected precipitation: **{prcp:.1f} mm**
+                - Temperature: **{tavg:.1f}°C**
+                
+                **RECOMMENDED ACTIONS:**
+                - Stay alert to weather updates
+                - Review emergency plans
+                - Secure outdoor items
+                """)
+            else:
+                st.success(f"""
+                ✅ **LOW FLOOD RISK TOMORROW ({tomorrow})**
+                
+                Weather forecast shows normal conditions:
+                - Expected precipitation: **{prcp:.1f} mm**
+                - Temperature: **{tavg:.1f}°C**
+                
+                No special precautions needed, but stay informed.
+                """)
+        
+        # Show input summary
+        with st.expander("📋 Input Summary"):
+            input_df = pd.DataFrame({
+                'Parameter': ['Temperature (Avg)', 'Temperature (Min)', 'Temperature (Max)', 
+                             'Precipitation', 'Humidity', 'Pressure', 'Wind Speed', 'Solar Radiation'],
+                'Value': [f"{tavg}°C", f"{tmin}°C", f"{tmax}°C", 
+                         f"{prcp} mm", f"{humidity}%", f"{pres} hPa", f"{wspd} km/h", f"{solar} MJ/m²"]
+            })
+            st.table(input_df)
+    
+    # Historical lookup section
+    st.markdown("---")
+    st.markdown("### 📜 Lookup Historical Date")
+    st.markdown("Check if a specific date in history had a flood event.")
+    
+    lookup_date = st.date_input(
+        "Select a historical date",
+        value=datetime(2010, 8, 1),
+        key="lookup_date"
+    )
+    
+    if st.button("🔍 Lookup Date"):
+        # Load historical data
+        data_path = DATA_DIR / "flood_weather_dataset.csv"
+        if data_path.exists():
+            df = pd.read_csv(data_path)
+            df['date'] = pd.to_datetime(df['date'])
+            
+            # Find matching records
+            matches = df[df['date'].dt.date == lookup_date]
+            
+            if len(matches) > 0:
+                st.success(f"Found {len(matches)} record(s) for {lookup_date}")
+                
+                for _, row in matches.iterrows():
+                    loc_name = row.get('location_name', 'Unknown')
+                    flood = row.get('flood_event', 0)
+                    
+                    if flood == 1:
+                        st.error(f"🌊 **FLOOD EVENT** at {loc_name}")
+                        if 'flood_severity' in row and pd.notna(row['flood_severity']):
+                            st.write(f"Severity: {row['flood_severity']}")
+                        if 'flood_notes' in row and pd.notna(row['flood_notes']):
+                            st.write(f"Notes: {row['flood_notes']}")
+                    else:
+                        st.info(f"✅ No flood at {loc_name}")
+                    
+                    # Show weather conditions
+                    with st.expander(f"Weather at {loc_name}"):
+                        weather_cols = ['tavg', 'tmin', 'tmax', 'prcp', 'humidity', 'wspd', 'pres']
+                        weather_data = {col: row.get(col, 'N/A') for col in weather_cols if col in row}
+                        st.json(weather_data)
+            else:
+                st.warning(f"No data found for {lookup_date}")
+        else:
+            st.error("Historical data not available.")
+
+
+# ============================================================================
+# AI TECHNIQUE PAGES - Week 8-12 Requirements
+# ============================================================================
+
+def show_search_algorithms():
+    """Display Search Algorithms page (Week 8)"""
+    st.title("🔍 Search Algorithms for Flood Evacuation")
+    
+    st.markdown("""
+    ### Week 8: Uninformed & Informed Search
+    
+    This module demonstrates search algorithms applied to **flood evacuation route planning**.
+    The algorithms find optimal paths from flood-affected areas to safe zones.
+    
+    - **A* Search**: Informed search using heuristics (optimal & complete)
+    - **BFS**: Breadth-first search (optimal for unweighted graphs)
+    - **DFS**: Depth-first search (memory efficient but not optimal)
+    """)
+    
+    try:
+        from code.search_algorithms import FloodEvacuationGrid
+        
+        st.subheader("🗺️ Flood Evacuation Grid Simulation")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            grid_size = st.slider("Grid Size", 10, 30, 15)
+            flood_prob = st.slider("Flood Probability", 0.1, 0.5, 0.25)
+        with col2:
+            n_safe_zones = st.slider("Number of Safe Zones", 1, 5, 2)
+            seed = st.number_input("Random Seed", 0, 1000, 42)
+        
+        if st.button("🚀 Generate & Solve Evacuation Problem"):
+            grid = FloodEvacuationGrid(grid_size, grid_size)
+            grid.generate_flood_scenario(flood_probability=flood_prob, 
+                                        n_safe_zones=n_safe_zones, 
+                                        seed=seed)
+            
+            # Show grid visualization
+            st.markdown("#### Grid Legend")
+            st.markdown("- 🟦 Normal terrain | 🟥 Flooded | 🟩 Safe zone | 🟨 Start")
+            
+            # Create visual grid
+            visual_grid = []
+            for i in range(grid_size):
+                row = []
+                for j in range(grid_size):
+                    if grid.grid[i][j] == 2:
+                        row.append("🟥")
+                    elif (i, j) in grid.safe_zones:
+                        row.append("🟩")
+                    elif (i, j) == grid.start:
+                        row.append("🟨")
+                    else:
+                        row.append("🟦")
+                visual_grid.append("".join(row))
+            
+            st.text("\n".join(visual_grid))
+            
+            st.info(f"Start: {grid.start} | Safe Zones: {grid.safe_zones}")
+            
+            # Compare algorithms
+            st.subheader("📊 Algorithm Comparison")
+            results = grid.compare_algorithms()
+            
+            # Display comparison table
+            results_df = pd.DataFrame(results["comparison"])
+            st.dataframe(results_df, hide_index=True)
+            
+            # Show detailed results
+            col1, col2, col3 = st.columns(3)
+            
+            details = results.get("details", {})
+            
+            with col1:
+                st.markdown("**A* Search**")
+                a_star = details.get("A*", {})
+                if a_star.get("success"):
+                    st.success(f"✓ Path found: {a_star.get('path_length', 0)} steps")
+                    st.write(f"Cost: {a_star.get('cost', 0):.1f}")
+                else:
+                    st.error("No path found")
+                    
+            with col2:
+                st.markdown("**BFS**")
+                bfs = details.get("BFS", {})
+                if bfs.get("success"):
+                    st.success(f"✓ Path found: {bfs.get('path_length', 0)} steps")
+                else:
+                    st.error("No path found")
+                    
+            with col3:
+                st.markdown("**DFS**")
+                dfs = details.get("DFS", {})
+                if dfs.get("success"):
+                    st.warning(f"⚠️ Path found: {dfs.get('path_length', 0)} steps")
+                    st.caption("(May not be optimal)")
+                else:
+                    st.error("No path found")
+            
+            st.info("💡 A* and BFS find optimal paths, while DFS may find longer non-optimal paths.")
+            
+    except ImportError as e:
+        st.error(f"Could not load search algorithms module: {e}")
+
+
+def show_csp_page():
+    """Display CSP Resource Allocation page (Week 9)"""
+    st.title("🧩 CSP: Emergency Resource Allocation")
+    
+    st.markdown("""
+    ### Week 9: Constraint Satisfaction Problems
+    
+    This module uses **CSP techniques** to allocate emergency resources during flood disasters.
+    
+    **Problem Formulation:**
+    - **Variables**: Evacuation shelters
+    - **Domains**: Available resources (medical teams, rescue boats, supplies)
+    - **Constraints**: Resource limits, minimum requirements, distance limits
+    
+    **Techniques Used:**
+    - AC-3 Arc Consistency
+    - Backtracking Search
+    - MRV (Minimum Remaining Values) heuristic
+    - LCV (Least Constraining Value) heuristic
+    """)
+    
+    try:
+        from code.csp_resource_allocation import FloodResourceAllocationCSP
+        
+        st.subheader("⚙️ Configure Scenario")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            num_shelters = st.slider("Number of Shelters", 2, 8, 4)
+        with col2:
+            num_resources = st.slider("Number of Resources", 4, 15, 8)
+        
+        if st.button("🔧 Solve Resource Allocation"):
+            csp = FloodResourceAllocationCSP()
+            csp.generate_scenario(num_shelters=num_shelters, 
+                                 num_resources=num_resources, 
+                                 seed=42)
+            
+            # Show shelters
+            st.subheader("🏠 Evacuation Shelters")
+            shelter_data = []
+            for s_id, s in csp.shelters.items():
+                shelter_data.append({
+                    "ID": s_id,
+                    "Name": s["name"],
+                    "Population": s["population"],
+                    "Priority": s["priority"],
+                    "Min Medical": s["min_medical"],
+                    "Min Rescue": s["min_rescue"],
+                    "Min Supplies": s["min_supplies"]
+                })
+            st.dataframe(pd.DataFrame(shelter_data))
+            
+            # Show resources
+            st.subheader("📦 Available Resources")
+            resource_data = []
+            for r_id, r in csp.resources.items():
+                resource_data.append({
+                    "ID": r_id,
+                    "Type": r["type"].capitalize(),
+                    "Quantity": r["quantity"]
+                })
+            st.dataframe(pd.DataFrame(resource_data))
+            
+            # Solve
+            with st.spinner("Solving CSP with backtracking..."):
+                result = csp.solve()
+            
+            if result["success"]:
+                st.success("✅ Solution Found!")
+                
+                st.subheader("📋 Resource Assignments")
+                for entry in result["summary"]:
+                    with st.expander(f"📍 {entry['shelter']} (Pop: {entry['population']})"):
+                        if entry["resources_assigned"]:
+                            for r in entry["resources_assigned"]:
+                                icon = {"medical": "🏥", "rescue": "🚤", "supplies": "📦"}.get(r["type"], "•")
+                                st.write(f"{icon} {r['id']}: {r['type']} (Qty: {r['quantity']})")
+                        else:
+                            st.write("No resources assigned")
+            else:
+                st.error(f"❌ No solution found: {result.get('error')}")
+                
+    except ImportError as e:
+        st.error(f"Could not load CSP module: {e}")
+
+
+def show_neural_network_page():
+    """Display Neural Network page (Week 11)"""
+    st.title("🧬 LSTM Neural Network for Flood Prediction")
+    
+    st.markdown("""
+    ### Week 11: Neural Networks
+    
+    This module implements an **LSTM (Long Short-Term Memory)** neural network
+    for time-series flood prediction.
+    
+    **Architecture:**
+    - Input Layer: Sequential weather data (7 days lookback)
+    - LSTM Layer: 64 hidden units with tanh activation
+    - Output Layer: Sigmoid for flood probability
+    
+    **Why LSTM?**
+    - Captures temporal patterns in weather data
+    - Handles long-term dependencies (monsoon buildup)
+    - Better than simple feedforward networks for sequences
+    """)
+    
+    try:
+        from code.neural_network import SimpleLSTMWrapper, FloodLSTM
+        
+        st.subheader("🎯 Train LSTM on Synthetic Data")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            n_samples = st.slider("Training Samples", 200, 1000, 500)
+            epochs = st.slider("Training Epochs", 10, 50, 20)
+        with col2:
+            hidden_size = st.slider("Hidden Units", 16, 64, 32)
+            seq_length = st.slider("Sequence Length (days)", 3, 14, 7)
+        
+        if st.button("🚀 Train LSTM Model"):
+            with st.spinner("Generating data and training..."):
+                # Generate synthetic data
+                np.random.seed(42)
+                X = np.random.randn(n_samples, 5)  # 5 weather features
+                
+                # Create flood labels based on precipitation pattern
+                flood_prob = 0.3 * X[:, 1] + 0.2 * X[:, 2]
+                y = (flood_prob > np.percentile(flood_prob, 90)).astype(int)
+                
+                st.info(f"Dataset: {n_samples} samples, {sum(y)} flood events ({100*sum(y)/len(y):.1f}%)")
+                
+                # Split data
+                split = int(0.8 * n_samples)
+                X_train, X_test = X[:split], X[split:]
+                y_train, y_test = y[:split], y[split:]
+                
+                # Train
+                lstm = SimpleLSTMWrapper(sequence_length=seq_length, hidden_size=hidden_size)
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                history = lstm.fit(X_train, y_train, epochs=epochs)
+                progress_bar.progress(100)
+                
+                # Evaluate
+                metrics = lstm.evaluate(X_test, y_test)
+                
+            st.success("Training Complete!")
+            
+            # Show metrics
+            st.subheader("📊 Model Performance")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Accuracy", f"{metrics['accuracy']:.2%}")
+            col2.metric("Precision", f"{metrics['precision']:.2%}")
+            col3.metric("Recall", f"{metrics['recall']:.2%}")
+            col4.metric("F1 Score", f"{metrics['f1']:.2%}")
+            
+            # Training curve
+            if PLOTLY_AVAILABLE:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=history['loss'], name='Loss', mode='lines'))
+                fig.update_layout(title='Training Loss', xaxis_title='Epoch', yaxis_title='Loss')
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Confusion matrix
+            st.subheader("Confusion Matrix")
+            cm = metrics['confusion_matrix']
+            st.write(f"TN: {cm[0][0]} | FP: {cm[0][1]}")
+            st.write(f"FN: {cm[1][0]} | TP: {cm[1][1]}")
+            
+    except ImportError as e:
+        st.error(f"Could not load neural network module: {e}")
+
+
+def show_clustering_page():
+    """Display K-Means Clustering page (Week 12)"""
+    st.title("📈 K-Means Clustering for Flood Patterns")
+    
+    st.markdown("""
+    ### Week 12: Clustering Analysis
+    
+    This module uses **K-Means clustering** to identify patterns in flood conditions.
+    
+    **Applications:**
+    - Identify different types of flood conditions (monsoon, flash flood, riverine)
+    - Group similar weather patterns
+    - Discover regional risk profiles
+    
+    **Techniques:**
+    - K-Means++ initialization
+    - Elbow method for optimal K
+    - Cluster interpretation based on centroids
+    """)
+    
+    try:
+        from code.clustering import FloodPatternKMeans, FloodPatternAnalyzer, find_optimal_k
+        
+        st.subheader("⚙️ Clustering Configuration")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            n_samples = st.slider("Number of Samples", 200, 800, 400)
+        with col2:
+            n_clusters = st.slider("Number of Clusters (K)", 2, 8, 5)
+        
+        if st.button("🔬 Run Clustering Analysis"):
+            with st.spinner("Clustering weather patterns..."):
+                # Generate synthetic weather data with patterns
+                np.random.seed(42)
+                
+                # Create different weather patterns
+                p1 = np.random.randn(n_samples//4, 5) + np.array([25, 50, 85, 1000, 10])  # Monsoon
+                p2 = np.random.randn(n_samples//4, 5) + np.array([30, 80, 70, 995, 15])   # Flash flood
+                p3 = np.random.randn(n_samples//4, 5) + np.array([35, 5, 40, 1015, 5])    # Dry
+                p4 = np.random.randn(n_samples//4, 5) + np.array([28, 20, 60, 1008, 8])   # Moderate
+                
+                X = np.vstack([p1, p2, p3, p4])
+                feature_names = ['Temperature', 'Precipitation', 'Humidity', 'Pressure', 'Wind Speed']
+                
+                # Fit clustering
+                analyzer = FloodPatternAnalyzer(n_clusters=n_clusters)
+                analyzer.fit(X, feature_names)
+                
+                labels = analyzer.predict(X)
+                
+            st.success("Clustering Complete!")
+            
+            # Cluster distribution
+            st.subheader("📊 Cluster Distribution")
+            cluster_counts = pd.Series(labels).value_counts().sort_index()
+            
+            if PLOTLY_AVAILABLE:
+                fig = px.pie(values=cluster_counts.values, 
+                           names=[f"Cluster {i}" for i in cluster_counts.index],
+                           title="Weather Pattern Distribution")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.bar_chart(cluster_counts)
+            
+            # Cluster interpretations
+            st.subheader("🔍 Cluster Interpretations")
+            for k, interp in analyzer.cluster_interpretations.items():
+                with st.expander(f"Cluster {k}: {interp['name']}"):
+                    risk_color = {"HIGH": "🔴", "MODERATE": "🟡", "LOW": "🟢"}.get(interp['risk_level'], "⚪")
+                    st.write(f"**Risk Level**: {risk_color} {interp['risk_level']}")
+                    st.write(f"**Description**: {interp['description']}")
+            
+            # Test sample analysis
+            st.subheader("🧪 Analyze Sample")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            temp = col1.number_input("Temp", value=25.0)
+            prcp = col2.number_input("Precip", value=40.0)
+            humid = col3.number_input("Humidity", value=70.0)
+            pres = col4.number_input("Pressure", value=1000.0)
+            wind = col5.number_input("Wind", value=10.0)
+            
+            if st.button("Classify Sample"):
+                sample = np.array([[temp, prcp, humid, pres, wind]])
+                analysis = analyzer.analyze_sample(sample)
+                
+                st.info(f"**Pattern**: {analysis['pattern_name']}")
+                st.info(f"**Risk Level**: {analysis['risk_level']}")
+                
+    except ImportError as e:
+        st.error(f"Could not load clustering module: {e}")
+
+
+def show_reinforcement_learning_page():
+    """Display Reinforcement Learning page (Week 12)"""
+    st.title("🎮 Q-Learning for Evacuation Decisions")
+    
+    st.markdown("""
+    ### Week 12: Reinforcement Learning
+    
+    This module implements **Q-Learning** for optimal flood evacuation decisions.
+    
+    **Environment:**
+    - **States**: (flood_level, population_at_risk, resources_deployed, time_remaining)
+    - **Actions**: Wait, Issue Warning, Voluntary Evacuation, Mandatory Evacuation, Deploy Resources
+    - **Rewards**: +100 per person saved, -500 per casualty, -30 for false alarms
+    
+    **Q-Learning Features:**
+    - Epsilon-greedy exploration
+    - Bellman equation updates
+    - Learned policy for optimal decisions
+    """)
+    
+    try:
+        from code.reinforcement_learning import FloodEvacuationRL
+        
+        st.subheader("🎯 Train Q-Learning Agent")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            episodes = st.slider("Training Episodes", 100, 1000, 300)
+        with col2:
+            eval_episodes = st.slider("Evaluation Episodes", 20, 100, 50)
+        
+        if st.button("🚀 Train Agent"):
+            rl_system = FloodEvacuationRL()
+            
+            with st.spinner("Training Q-Learning agent..."):
+                progress = st.progress(0)
+                history = rl_system.train(episodes=episodes)
+                progress.progress(100)
+                
+            st.success("Training Complete!")
+            
+            # Training curve
+            if PLOTLY_AVAILABLE:
+                fig = go.Figure()
+                # Smooth rewards
+                window = min(50, len(history['rewards']) // 5)
+                smoothed = pd.Series(history['rewards']).rolling(window).mean()
+                fig.add_trace(go.Scatter(y=smoothed, name='Avg Reward', mode='lines'))
+                fig.update_layout(title='Training Progress', xaxis_title='Episode', yaxis_title='Reward')
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Evaluate
+            st.subheader("📊 Evaluation Results")
+            with st.spinner("Evaluating policy..."):
+                results = rl_system.evaluate(n_episodes=eval_episodes)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Avg Reward", f"{results['avg_reward']:.1f}")
+            col2.metric("Avg Evacuated", f"{results['avg_evacuated']:.0f}")
+            col3.metric("Avg Casualties", f"{results['avg_casualties']:.1f}")
+            col4.metric("Success Rate", f"{results['success_rate']*100:.1f}%")
+            
+            # Get recommendation
+            st.subheader("🎯 Get Recommendation")
+            col1, col2, col3, col4 = st.columns(4)
+            flood_level = col1.selectbox("Flood Level", [0, 1, 2, 3, 4], index=2,
+                                        format_func=lambda x: ["None", "Low", "Moderate", "High", "Severe"][x])
+            population = col2.number_input("Population at Risk", 100, 1000, 500)
+            resources = col3.number_input("Resources Deployed", 0, 10, 2)
+            time_left = col4.number_input("Hours Remaining", 1, 24, 12)
+            
+            if st.button("Get Recommendation"):
+                rec = rl_system.get_recommendation(flood_level, population, resources, time_left)
+                
+                action_icons = {
+                    "Wait & Monitor": "⏳",
+                    "Issue Warning": "⚠️",
+                    "Voluntary Evacuation": "🚶",
+                    "Mandatory Evacuation": "🚨",
+                    "Deploy Resources": "🚁"
+                }
+                icon = action_icons.get(rec['action_name'], "•")
+                
+                st.success(f"{icon} **Recommended Action**: {rec['action_name']}")
+                st.info(rec['explanation'])
+                
+                with st.expander("Q-Values for All Actions"):
+                    for action, value in rec['all_q_values'].items():
+                        st.write(f"{action}: {value:.2f}")
+                        
+    except ImportError as e:
+        st.error(f"Could not load reinforcement learning module: {e}")
+
+
+def show_explainability_page(model_data):
+    """Display SHAP/LIME Explainability page"""
+    st.title("🔬 Model Explainability (SHAP & LIME)")
+    
+    st.markdown("""
+    ### Explainability: Understanding Model Decisions
+    
+    This module explains **why** the model makes specific predictions.
+    
+    **SHAP (SHapley Additive exPlanations):**
+    - Based on game theory (Shapley values)
+    - Shows contribution of each feature to prediction
+    - Global and local explanations
+    
+    **LIME (Local Interpretable Model-agnostic Explanations):**
+    - Fits simple model locally
+    - Provides interpretable feature weights
+    - Works with any black-box model
+    """)
+    
+    try:
+        from code.explainability import FloodPredictionExplainer, SHAPExplainer, LIMEExplainer
+        
+        # Create demo model if no model loaded
+        if model_data is None:
+            st.warning("No trained model found. Using demo model for illustration.")
+            
+            class DemoModel:
+                def predict_proba(self, X):
+                    X = np.atleast_2d(X)
+                    probs = 0.3 * (X[:, 3] / 100) + 0.2 * (X[:, 7] / 100)
+                    probs = np.clip(probs, 0, 1)
+                    return np.column_stack([1 - probs, probs])
+                
+                def predict(self, X):
+                    return (self.predict_proba(X)[:, 1] > 0.5).astype(int)
+            
+            model = DemoModel()
+        else:
+            if isinstance(model_data, dict):
+                model = model_data.get('model', model_data)
+            else:
+                model = model_data
+        
+        feature_names = ['tavg', 'tmin', 'tmax', 'prcp', 'wspd', 'wpgt', 'pres', 'humidity',
+                        'solar_radiation', 'month', 'day_of_year', 'quarter']
+        
+        st.subheader("🎯 Explain a Prediction")
+        
+        st.markdown("**Enter Weather Conditions:**")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            tavg = st.number_input("Temperature (°C)", value=25.0)
+            tmin = st.number_input("Min Temp", value=20.0)
+            tmax = st.number_input("Max Temp", value=30.0)
+        with col2:
+            prcp = st.number_input("Precipitation (mm)", value=50.0)
+            wspd = st.number_input("Wind Speed (km/h)", value=15.0)
+            wpgt = st.number_input("Wind Gust", value=25.0)
+        with col3:
+            pres = st.number_input("Pressure (hPa)", value=1005.0)
+            humidity = st.number_input("Humidity (%)", value=80.0)
+            solar = st.number_input("Solar Radiation", value=15.0)
+        with col4:
+            month = st.selectbox("Month", range(1, 13), index=6)
+            day_of_year = st.number_input("Day of Year", 1, 366, 180)
+            quarter = (month - 1) // 3 + 1
+            st.write(f"Quarter: {quarter}")
+        
+        sample = np.array([tavg, tmin, tmax, prcp, wspd, wpgt, pres, humidity, 
+                          solar, month, day_of_year, quarter])
+        
+        if st.button("🔍 Explain Prediction"):
+            # Generate background data
+            np.random.seed(42)
+            background = np.random.randn(100, len(feature_names)) * 10 + sample
+            
+            explainer = FloodPredictionExplainer(model, feature_names)
+            explainer.fit(background)
+            
+            with st.spinner("Generating explanations..."):
+                explanation = explainer.explain_prediction(sample, method='both')
+            
+            # Show prediction
+            pred = explanation.get('shap', {}).get('prediction', 0)
+            risk_level = "HIGH" if pred > 0.6 else "MODERATE" if pred > 0.3 else "LOW"
             
             col1, col2 = st.columns(2)
-            
             with col1:
-                st.markdown("#### 🤖 Logistic Regression")
-                lr_risk, lr_flood_prob, lr_color = get_risk_level(lr_prob)
-                st.markdown(f"<div style='background: {lr_color}; padding: 20px; border-radius: 10px; color: white; text-align: center;'><h2>{lr_risk}</h2><h3>{lr_flood_prob:.2%}</h3></div>", unsafe_allow_html=True)
-                lr_correct = "✅ Correct" if (lr_pred == sample_data['flood_event']) else "❌ Wrong"
-                st.metric("Prediction Accuracy", lr_correct)
-            
+                st.metric("Flood Probability", f"{pred*100:.1f}%")
             with col2:
-                st.markdown("#### 🌲 Random Forest (Recommended)")
-                rf_risk, rf_flood_prob, rf_color = get_risk_level(rf_prob)
-                st.markdown(f"<div style='background: {rf_color}; padding: 20px; border-radius: 10px; color: white; text-align: center;'><h2>{rf_risk}</h2><h3>{rf_flood_prob:.2%}</h3></div>", unsafe_allow_html=True)
-                rf_correct = "✅ Correct" if (rf_pred == sample_data['flood_event']) else "❌ Wrong"
-                st.metric("Prediction Accuracy", rf_correct)
-    
-    # ========== TAB 3: Random Data ==========
-    with tab3:
-        st.markdown("### Generate Random Weather Data")
-        
-        if st.button("🎲 Generate Random Data", use_container_width=True):
-            random_features = {}
-            for feature, stats in feature_stats.items():
-                random_features[feature] = np.random.uniform(stats['min'], stats['max'])
+                risk_colors = {"HIGH": "🔴", "MODERATE": "🟡", "LOW": "🟢"}
+                st.metric("Risk Level", f"{risk_colors.get(risk_level, '')} {risk_level}")
             
-            features_df = create_sample_data(random_features)
+            st.markdown("---")
             
-            lr_pred, lr_prob = get_prediction(lr_model, features_df)
-            rf_pred, rf_prob = get_prediction(rf_model, features_df)
-            
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                st.markdown("#### 🎲 Random Weather Data")
-                display_df = pd.DataFrame({
-                    'Feature': list(random_features.keys()),
-                    'Value': [f"{v:.2f}" for v in random_features.values()]
-                })
-                st.dataframe(display_df, use_container_width=True)
-            
-            with col2:
-                st.markdown("#### 📊 Predictions")
-                st.markdown("**🤖 Logistic Regression:**")
-                lr_risk, lr_flood_prob, lr_color = get_risk_level(lr_prob)
-                st.markdown(f"<div style='background: {lr_color}; padding: 15px; border-radius: 8px; color: white;'><p>{lr_risk}</p><p>Confidence: {lr_flood_prob:.2%}</p></div>", unsafe_allow_html=True)
+            # SHAP explanations
+            if 'shap' in explanation:
+                st.subheader("📊 SHAP Feature Contributions")
                 
-                st.markdown("**🌲 Random Forest:**")
-                rf_risk, rf_flood_prob, rf_color = get_risk_level(rf_prob)
-                st.markdown(f"<div style='background: {rf_color}; padding: 15px; border-radius: 8px; color: white;'><p>{rf_risk}</p><p>Confidence: {rf_flood_prob:.2%}</p></div>", unsafe_allow_html=True)
+                shap_vals = explanation['shap']['shap_values']
+                contrib_df = pd.DataFrame({
+                    'Feature': feature_names,
+                    'Value': sample,
+                    'SHAP Value': shap_vals
+                }).sort_values('SHAP Value', key=abs, ascending=False)
+                
+                if PLOTLY_AVAILABLE:
+                    fig = px.bar(contrib_df.head(10), x='SHAP Value', y='Feature', 
+                               orientation='h', color='SHAP Value',
+                               color_continuous_scale=['green', 'gray', 'red'])
+                    fig.update_layout(title='Top 10 Feature Contributions')
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.dataframe(contrib_df)
+                
+                st.markdown("**Interpretation:**")
+                st.markdown(explanation['shap']['prediction_explanation'])
+            
+            # Flood interpretation
+            st.subheader("🌊 Flood Risk Assessment")
+            st.markdown(explanation.get('flood_interpretation', ''))
+                
+    except ImportError as e:
+        st.error(f"Could not load explainability module: {e}")
 
-# ============================================================================
-# PAGE: MODEL PERFORMANCE
-# ============================================================================
-elif app_mode == "📈 Model Performance":
-    st.markdown("## 📈 Model Performance Metrics")
-    
-    # Load metrics
-    metrics_df = pd.read_csv('results/model_metrics.csv')
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 📊 Performance Summary")
-        st.dataframe(metrics_df, use_container_width=True)
-    
-    with col2:
-        st.markdown("### 🏆 Model Comparison")
-        comparison_data = {
-            'Metric': ['Accuracy', 'AUC-ROC', 'Winner'],
-            'Logistic Reg': ['99.91%', '0.8243', ''],
-            'Random Forest': ['99.91%', '0.8643', '⭐']
-        }
-        comparison_df = pd.DataFrame(comparison_data)
-        st.dataframe(comparison_df, use_container_width=True)
-    
-    # Display visualizations
-    st.markdown("---")
-    st.markdown("### 📈 Visualizations")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.checkbox("Show Model Performance Comparison"):
-            try:
-                img = plt.imread('results/model_performance_comparison.png')
-                st.image(img, caption="Model Performance Comparison", use_column_width=True)
-            except:
-                st.warning("Visualization not found")
-    
-    with col2:
-        if st.checkbox("Show ROC Curves"):
-            try:
-                img = plt.imread('results/roc_curves.png')
-                st.image(img, caption="ROC Curves", use_column_width=True)
-            except:
-                st.warning("Visualization not found")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.checkbox("Show Confusion Matrices"):
-            try:
-                img = plt.imread('results/confusion_matrices.png')
-                st.image(img, caption="Confusion Matrices", use_column_width=True)
-            except:
-                st.warning("Visualization not found")
-    
-    with col2:
-        if st.checkbox("Show Feature Importance Comparison"):
-            try:
-                img = plt.imread('results/model_performance_comparison.png')
-                st.image(img, caption="Feature Analysis", use_column_width=True)
-            except:
-                st.warning("Visualization not found")
 
-# ============================================================================
-# PAGE: DATA ANALYSIS
-# ============================================================================
-elif app_mode == "📊 Data Analysis":
-    st.markdown("## 📊 Data Analysis & Statistics")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Total Test Samples", f"{len(test_data):,}")
-    with col2:
-        st.metric("Number of Features", len(test_data.columns) - 1)
-    with col3:
-        flood_percentage = (test_data['flood_event'].sum() / len(test_data)) * 100
-        st.metric("Flood Events", f"{flood_percentage:.2f}%")
-    
-    st.markdown("---")
-    
-    # Feature statistics
-    st.markdown("### 📋 Feature Statistics")
-    
-    feature_cols = [col for col in test_data.columns if col != 'flood_event']
-    selected_feature = st.selectbox("Select Feature:", feature_cols)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Mean", f"{test_data[selected_feature].mean():.2f}")
-    with col2:
-        st.metric("Median", f"{test_data[selected_feature].median():.2f}")
-    with col3:
-        st.metric("Min", f"{test_data[selected_feature].min():.2f}")
-    with col4:
-        st.metric("Max", f"{test_data[selected_feature].max():.2f}")
-    
-    # Distribution plot
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.hist(test_data[selected_feature], bins=30, color='#667eea', edgecolor='black', alpha=0.7)
-    ax.set_xlabel(selected_feature)
-    ax.set_ylabel("Frequency")
-    ax.set_title(f"Distribution of {selected_feature}")
-    ax.grid(True, alpha=0.3)
-    st.pyplot(fig)
-    
-    st.markdown("---")
-    
-    # Correlation analysis
-    st.markdown("### 🔗 Feature Correlation")
-    
-    if st.checkbox("Show Correlation Matrix"):
-        fig, ax = plt.subplots(figsize=(12, 10))
-        correlation_matrix = test_data.corr()
-        sns.heatmap(correlation_matrix, annot=False, cmap='coolwarm', center=0, ax=ax, square=True)
-        ax.set_title("Feature Correlation Matrix")
-        st.pyplot(fig)
-
-# ============================================================================
-# PAGE: ABOUT
-# ============================================================================
-elif app_mode == "ℹ️ About":
-    st.markdown("## ℹ️ About This Application")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        ### 🎯 Project Overview
-        
-        This AI-Based Natural Disaster Prediction System is designed to predict 
-        flood risks in Khyber Pakhtunkhwa province, specifically in Swat and Upper Dir districts.
-        
-        **Key Features:**
-        - Real-time flood risk prediction
-        - Weather-based analysis
-        - Machine learning models
-        - Interactive web interface
-        
-        **Technologies Used:**
-        - Python 3.9
-        - Pandas, NumPy, Scikit-learn
-        - Streamlit for UI
-        - Matplotlib, Seaborn for visualization
-        """)
-    
-    with col2:
-        st.markdown("""
-        ### 🤖 Models
-        
-        **Logistic Regression**
-        - Fast and interpretable
-        - AUC-ROC: 0.8243
-        
-        **Random Forest** ⭐
-        - Ensemble method (200 trees)
-        - Better performance
-        - AUC-ROC: 0.8643
-        
-        ### 📊 Data
-        
-        - Total samples: 5,752
-        - Test samples: 1,151
-        - Features: 19 engineered features
-        - Weather variables from multiple sources
-        """)
-    
-    st.markdown("---")
+def show_about():
+    """Display about page"""
+    st.title("ℹ️ About This Project")
     
     st.markdown("""
-    ### 📂 Project Structure
+    ## AI-Based Natural Disaster Prediction Web App
     
-    ```
-    code/
-    ├── preprocessing.py          # Data preprocessing
-    ├── baseline_models.py        # Model training
-    ├── model_evaluation.py       # Model evaluation
-    └── clean_weather_pipeline.py # Weather data pipeline
+    This application predicts flood risk for districts in Khyber Pakhtunkhwa, Pakistan
+    using machine learning models trained on historical weather and flood data.
     
-    results/
-    ├── model_metrics.csv         # Performance metrics
-    ├── training_data.csv         # Preprocessed training data
-    ├── test_data.csv            # Preprocessed test data
-    ├── logistic_regression_model.pkl  # Trained LR model
-    ├── random_forest_model.pkl        # Trained RF model
-    └── *.png                    # Visualization files
+    ### 🎯 Main Features
+    - **Real-time Weather Integration**: Live weather data from OpenWeatherMap API
+    - **ML-Based Predictions**: Trained models predict flood probability
+    - **Custom Prediction**: Enter manual weather parameters for prediction
+    - **Historical Analysis**: View past weather patterns and flood events (2000-2025)
+    - **Alert System**: Color-coded risk levels for quick assessment
     
-    notebooks/
-    └── ml_pipeline.ipynb        # Interactive notebook
-    ```
+    ### 🧠 AI Techniques Implemented
     
-    ### 📚 Documentation
+    | Week | Technique | Application |
+    |------|-----------|-------------|
+    | 8 | **Search Algorithms** | A*, BFS, DFS for evacuation route planning |
+    | 9 | **CSP** | Constraint satisfaction for emergency resource allocation |
+    | 11 | **Neural Networks** | LSTM for time-series flood prediction |
+    | 12 | **Clustering** | K-Means for flood pattern analysis |
+    | 12 | **Reinforcement Learning** | Q-Learning for evacuation decisions |
+    | Bonus | **Explainability** | SHAP & LIME for model interpretation |
     
-    - `README.md` - Project overview
-    - `ENVIRONMENT_SETUP.md` - Environment setup guide
-    - `ML_PIPELINE_README.md` - ML pipeline documentation
-    - `XGBOOST_ERROR_RESOLUTION.md` - Error resolution guide
-    """)
+    ### 📍 Covered Locations
+    - Swat District, KP
+    - Upper Dir District, KP
     
-    st.markdown("---")
+    ### 🔬 Technology Stack
+    - **Frontend**: Streamlit with Plotly visualizations
+    - **ML Models**: Logistic Regression, Random Forest, Gradient Boosting
+    - **Neural Network**: Custom LSTM implementation
+    - **Data Sources**: Meteostat, NASA POWER, NDMA Reports
+    - **Deployment**: Docker, GitHub Actions CI/CD
     
-    st.markdown("""
+    ### 📊 Dataset Statistics
+    - **Total Records**: 18,902 weather observations
+    - **Time Range**: January 2000 - November 2025
+    - **Flood Events**: 517 labeled events (2.74%)
+    - **Features**: 24 engineered features
+    
+    ### 🏆 Model Performance
+    - **Best Model**: Logistic Regression with class weights
+    - **Recall**: 60% (prioritized for safety)
+    - **Features**: Temperature, precipitation, humidity, pressure, wind speed, 
+      monsoon indicators, cumulative rainfall, and more
+    
     ### 👨‍💻 Developer
+    **CS351 - Artificial Intelligence Project**
+    Semester 5
     
-    **Developed by:** Shafiq Hussain  
-    **Date:** November 2025  
-    **Version:** 1.0.0
-    
-    ### 📞 Contact & Support
-    
-    For questions or issues, please refer to the documentation or contact the development team.
-    
-    ### 📜 License
-    
-    This project is provided as-is for educational and research purposes.
+    ### ⚠️ Disclaimer
+    This is an educational project demonstrating AI techniques for disaster prediction.
+    For actual emergency situations, please refer to official government sources and NDMA alerts.
     """)
+    
+    # Show project structure
+    with st.expander("📁 Project Structure"):
+        st.code("""
+AI-Based Natural Disaster/
+├── app.py                    # Main Streamlit application
+├── code/
+│   ├── search_algorithms.py  # A*, BFS, DFS (Week 8)
+│   ├── csp_resource_allocation.py  # CSP (Week 9)
+│   ├── neural_network.py     # LSTM (Week 11)
+│   ├── clustering.py         # K-Means (Week 12)
+│   ├── reinforcement_learning.py  # Q-Learning (Week 12)
+│   ├── explainability.py     # SHAP/LIME (Bonus)
+│   ├── improved_models.py    # ML model training
+│   ├── preprocessing.py      # Data preprocessing
+│   └── ...
+├── data/
+│   ├── processed/            # Cleaned datasets
+│   └── raw/                  # Raw data files
+├── results/                  # Model outputs
+├── Dockerfile               # Docker deployment
+├── docker-compose.yml       # Docker Compose config
+└── requirements.txt         # Python dependencies
+        """, language="")
 
-# ============================================================================
-# FOOTER
-# ============================================================================
-st.markdown("---")
-st.markdown("""
-    <div style="text-align: center; padding: 20px; color: #666;">
-    <p>🌊 AI-Based Natural Disaster Prediction System | Flood Risk Predictor for Khyber Pakhtunkhwa</p>
-    <p style="font-size: 12px;">© 2025 - All Rights Reserved | Version 1.0.0</p>
-    </div>
-    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
