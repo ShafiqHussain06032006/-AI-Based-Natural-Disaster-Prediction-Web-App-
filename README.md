@@ -1,77 +1,127 @@
-# 🌊 AI-Based Natural Disaster Prediction Web App
+<div align="center">
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-red.svg)](https://streamlit.io)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+# 🌊 AI-Based Natural Disaster Prediction System
 
-An AI-powered web application for predicting floods in Khyber Pakhtunkhwa, Pakistan using machine learning and multiple AI techniques.
+### Intelligent Flood Prediction for Khyber Pakhtunkhwa, Pakistan
 
----
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Click_Here-success?style=for-the-badge)](https://ai-based-natural-disaster-prediction.streamlit.app/)
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
-## 📋 Table of Contents
+<p align="center">
+  <strong>An AI-powered early warning system leveraging machine learning to predict flood events and save lives.</strong>
+</p>
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [AI Techniques Implemented](#-ai-techniques-implemented)
-- [Installation](#-installation)
-- [How to Run](#️-how-to-run)
-- [Project Structure](#-project-structure)
-- [How It Works](#️-how-it-works)
-- [Dataset](#-dataset)
-- [Model Performance](#-model-performance)
-- [API Keys](#-api-keys)
-- [Docker Deployment](#-docker-deployment)
-- [Technologies Used](#️-technologies-used)
+[**🌐 Try Live Demo**](https://ai-based-natural-disaster-prediction.streamlit.app/) • [**📖 Documentation**](#-documentation) • [**🚀 Quick Start**](#-quick-start) • [**🤝 Contributing**](#-contributing)
+
+</div>
 
 ---
 
 ## 🎯 Overview
 
-This project is a comprehensive **AI-based flood prediction system** for high-risk districts in Pakistan (Swat and Upper Dir). It combines:
+This project is a comprehensive **AI-based flood prediction system** designed for high-risk districts in Pakistan (Swat and Upper Dir). It combines cutting-edge machine learning with real-time weather data to provide accurate flood risk assessments.
 
-- **Real-time weather data** from OpenWeatherMap API
-- **Historical weather data** from NASA POWER and Meteostat (2000-2025)
-- **Machine learning models** trained on 18,902 weather observations
-- **Multiple AI techniques** including Search Algorithms, CSP, Neural Networks, Clustering, and Reinforcement Learning
+### 🔑 Key Capabilities
 
-### Why This Project?
+| Feature | Description |
+|---------|-------------|
+| **🌐 Real-time Prediction** | Live weather data integration via OpenWeatherMap API |
+| **📊 Historical Analysis** | 25 years of weather data (2000-2025) from NASA POWER & Meteostat |
+| **🤖 ML-Powered** | Trained on 18,902+ weather observations with 24 engineered features |
+| **🧠 Multi-AI Approach** | Search Algorithms, CSP, Neural Networks, Clustering, and RL |
 
-Pakistan faces devastating floods every year, especially during monsoon season. This system aims to:
+### 💡 Why This Project?
 
-- Predict flood risk based on weather conditions
-- Help authorities make informed evacuation decisions
-- Provide early warnings to save lives
+Pakistan faces devastating floods every year, especially during monsoon season (June-September). This system aims to:
+
+- ⚡ **Predict** flood risk based on weather conditions with 60% recall rate
+- 🏛️ **Assist** authorities in making informed evacuation decisions
+- 🚨 **Provide** early warnings to save lives and minimize damage
+
+---
+
+## 📋 Table of Contents
+
+<details>
+<summary>Click to expand</summary>
+
+- [Overview](#-overview)
+- [Features](#-features)
+- [AI Techniques](#-ai-techniques-implemented)
+- [Quick Start](#-quick-start)
+- [Installation](#-installation)
+- [Usage](#️-how-to-run)
+- [Project Structure](#-project-structure)
+- [How It Works](#️-how-it-works)
+- [Dataset](#-dataset)
+- [Model Performance](#-model-performance)
+- [API Configuration](#-api-keys)
+- [Docker Deployment](#-docker-deployment)
+- [Technologies](#️-technologies-used)
+- [Documentation](#-documentation)
+- [Contributing](#-contributing)
+
+</details>
 
 ---
 
 ## ✨ Features
 
-### Main Application Features
+### 🖥️ Main Application
 
-| Feature                  | Description                                           |
-| ------------------------ | ----------------------------------------------------- |
-| 🏠 **Dashboard**         | Real-time flood risk prediction with weather data     |
-| 🔮 **Custom Prediction** | Enter manual weather parameters for prediction        |
-| 📊 **Historical Data**   | Explore 25 years of weather and flood data            |
-| 🤖 **Model Info**        | View model performance metrics and feature importance |
-| ℹ️ **About**             | Project documentation and credits                     |
+| Feature | Description |
+|---------|-------------|
+| 🏠 **Interactive Dashboard** | Real-time flood risk prediction with live weather data |
+| 🔮 **Custom Prediction** | Manual weather parameter input for custom scenarios |
+| 📊 **Historical Explorer** | 25 years of weather and flood data visualization |
+| 🤖 **Model Insights** | Performance metrics, feature importance & explainability |
+| 📍 **Location Support** | Swat & Upper Dir district coverage |
 
-### AI Techniques (Interactive Demos)
+### 🧠 AI Technique Demonstrations
 
-| Technique                     | Application                                 |
-| ----------------------------- | ------------------------------------------- |
-| 🔍 **Search Algorithms**      | A\*, BFS, DFS for evacuation route planning |
-| 🧩 **CSP**                    | Resource allocation for emergency response  |
-| 🧬 **Neural Network**         | LSTM for time-series flood prediction       |
-| 📈 **K-Means Clustering**     | Weather pattern analysis                    |
-| 🎮 **Reinforcement Learning** | Q-Learning for evacuation decisions         |
-| 🔬 **SHAP/LIME**              | Model explainability                        |
+| Technique | Application | Status |
+|-----------|-------------|--------|
+| 🔍 **Search Algorithms** | A*, BFS, DFS for evacuation route planning | ✅ Interactive |
+| 🧩 **CSP Solver** | Resource allocation for emergency response | ✅ Interactive |
+| 🧬 **LSTM Neural Network** | Time-series flood prediction | ✅ Interactive |
+| 📈 **K-Means Clustering** | Weather pattern analysis & classification | ✅ Interactive |
+| 🎮 **Q-Learning** | Reinforcement learning for evacuation decisions | ✅ Interactive |
+| 🔬 **SHAP/LIME** | Model explainability & interpretability | ✅ Interactive |
+
+---
+
+## 🚀 Quick Start
+
+**Try the live demo instantly — no installation required!**
+
+<div align="center">
+
+### [🌐 Launch Live Demo](https://ai-based-natural-disaster-prediction.streamlit.app/)
+
+</div>
+
+Or run locally in 3 steps:
+
+```bash
+# 1. Clone repository
+git clone https://github.com/zohaibkhan745/-AI-Based-Natural-Disaster-Prediction-Web-App-.git
+cd -AI-Based-Natural-Disaster-Prediction-Web-App-
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Launch application
+streamlit run app.py
+```
 
 ---
 
 ## 🧠 AI Techniques Implemented
 
-### 1. Search Algorithms (Week 8)
+<details>
+<summary><b>🔍 1. Search Algorithms (Evacuation Route Planning)</b></summary>
 
 **File:** `code/search_algorithms.py`
 
@@ -86,9 +136,10 @@ Finds optimal evacuation routes from flooded areas to safe zones.
 
 **How it works:** Creates a grid-based flood scenario where some cells are flooded (obstacles). The algorithms find the shortest path from a start position to the nearest safe zone.
 
----
+</details>
 
-### 2. Constraint Satisfaction Problem (Week 9)
+<details>
+<summary><b>🧩 2. Constraint Satisfaction Problem (Resource Allocation)</b></summary>
 
 **File:** `code/csp_resource_allocation.py`
 
@@ -104,9 +155,10 @@ Allocates emergency resources (medical teams, rescue boats, supplies) to evacuat
 
 **How it works:** Given shelters with different populations and resource requirements, and limited resources, finds an optimal allocation that satisfies all constraints.
 
----
+</details>
 
-### 3. LSTM Neural Network (Week 11)
+<details>
+<summary><b>🧬 3. LSTM Neural Network (Time-Series Prediction)</b></summary>
 
 **File:** `code/neural_network.py`
 
@@ -119,9 +171,10 @@ Input (7 days × 5 features) → LSTM (64 units) → Dense (1, sigmoid)
 
 **How it works:** Looks at the past 7 days of weather data to predict if a flood will occur. The LSTM can capture patterns like gradual rainfall buildup.
 
----
+</details>
 
-### 4. K-Means Clustering (Week 12)
+<details>
+<summary><b>📈 4. K-Means Clustering (Weather Pattern Analysis)</b></summary>
 
 **File:** `code/clustering.py`
 
@@ -137,9 +190,10 @@ Clusters identified:
 
 **How it works:** Uses K-Means++ initialization to group similar weather patterns. Automatically labels clusters based on their characteristics.
 
----
+</details>
 
-### 5. Q-Learning / Reinforcement Learning (Week 12)
+<details>
+<summary><b>🎮 5. Q-Learning / Reinforcement Learning (Evacuation Decisions)</b></summary>
 
 **File:** `code/reinforcement_learning.py`
 
@@ -154,9 +208,10 @@ Environment:
 
 **How it works:** Simulates thousands of flood scenarios. The agent learns when to issue warnings, start evacuations, and deploy resources to maximize lives saved.
 
----
+</details>
 
-### 6. SHAP & LIME Explainability (Bonus)
+<details>
+<summary><b>🔬 6. SHAP & LIME Explainability (Model Interpretation)</b></summary>
 
 **File:** `code/explainability.py`
 
@@ -170,15 +225,19 @@ Example output:
  - Monsoon season (+15%)"
 ```
 
+</details>
+
 ---
 
-## 🚀 Installation
+## � Installation
 
 ### Prerequisites
 
-- Python 3.9 or higher
-- pip (Python package manager)
-- Git
+| Requirement | Version |
+|-------------|---------|
+| Python | 3.9+ |
+| pip | Latest |
+| Git | Latest |
 
 ### Step 1: Clone the Repository
 
@@ -395,29 +454,34 @@ User Input          ──▶  Feature Engineering  ──▶  Model Prediction
 
 ## 📈 Model Performance
 
-### Best Model: Logistic Regression (Class Weighted)
+### 🏆 Best Model: Logistic Regression (Class Weighted)
 
-| Metric        | Score  |
-| ------------- | ------ |
-| **Recall**    | 60% ⭐ |
-| **Precision** | 45%    |
-| **F1 Score**  | 51%    |
-| **Accuracy**  | 97%    |
+<div align="center">
 
-### Why Recall Matters
+| Metric | Score | Notes |
+|--------|-------|-------|
+| **Recall** | 60% ⭐ | Primary optimization target |
+| **Precision** | 45% | Acceptable false alarm rate |
+| **F1 Score** | 51% | Balanced performance |
+| **Accuracy** | 97% | Overall correctness |
+
+</div>
+
+### 💡 Why Recall Matters
 
 In flood prediction, **missing a real flood is worse than a false alarm**:
 
-- ✅ 60% of actual floods are detected
+- ✅ **60% of actual floods are correctly detected**
 - ⚠️ Some false alarms (acceptable trade-off for safety)
+- 🛡️ Prioritizes human safety over precision
 
-### Model Comparison
+### 📊 Model Comparison
 
-| Model                   | Recall  | Precision | F1  |
-| ----------------------- | ------- | --------- | --- |
-| **Logistic Regression** | **60%** | 45%       | 51% |
-| Random Forest           | 53%     | 52%       | 52% |
-| Gradient Boosting       | 43%     | 58%       | 49% |
+| Model | Recall | Precision | F1 | Best For |
+|-------|--------|-----------|-----|----------|
+| **Logistic Regression** | **60%** | 45% | 51% | ⭐ Production |
+| Random Forest | 53% | 52% | 52% | Balanced |
+| Gradient Boosting | 43% | 58% | 49% | Low False Alarms |
 
 ---
 
@@ -461,14 +525,41 @@ Access the app at `http://localhost:8501`
 
 ## 🛠️ Technologies Used
 
-| Category            | Technologies                          |
-| ------------------- | ------------------------------------- |
-| **Frontend**        | Streamlit, Plotly                     |
-| **ML/AI**           | scikit-learn, NumPy, Pandas           |
-| **Neural Network**  | Custom LSTM implementation            |
-| **APIs**            | OpenWeatherMap, NASA POWER, Meteostat |
-| **Deployment**      | Docker, GitHub Actions                |
-| **Version Control** | Git, GitHub                           |
+<div align="center">
+
+| Category | Technologies |
+|----------|--------------|
+| **Frontend** | ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white) ![Plotly](https://img.shields.io/badge/Plotly-3F4F75?style=flat&logo=plotly&logoColor=white) |
+| **ML/AI** | ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat&logo=scikit-learn&logoColor=white) ![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat&logo=numpy&logoColor=white) ![Pandas](https://img.shields.io/badge/Pandas-150458?style=flat&logo=pandas&logoColor=white) |
+| **Data Sources** | OpenWeatherMap API • NASA POWER • Meteostat |
+| **Deployment** | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white) ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat&logo=github-actions&logoColor=white) |
+| **Version Control** | ![Git](https://img.shields.io/badge/Git-F05032?style=flat&logo=git&logoColor=white) ![GitHub](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white) |
+
+</div>
+
+---
+
+## 📚 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [AI_TECHNIQUES_SUMMARY.md](AI_TECHNIQUES_SUMMARY.md) | Comprehensive AI techniques documentation |
+| [ML_PIPELINE_README.md](ML_PIPELINE_README.md) | Machine learning pipeline details |
+| [STREAMLIT_GUIDE.md](STREAMLIT_GUIDE.md) | Streamlit application guide |
+| [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) | Environment setup instructions |
+| [QUICK_START.md](QUICK_START.md) | Quick start guide |
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ---
 
@@ -497,24 +588,37 @@ Semester 5
 
 ## ⚠️ Disclaimer
 
-This is an **educational project** demonstrating AI techniques for disaster prediction. For actual emergency situations, please refer to:
+> **Note:** This is an **educational project** demonstrating AI techniques for disaster prediction. For actual emergency situations, please refer to official sources:
 
-- [NDMA Pakistan](https://ndma.gov.pk/)
-- [PMD Pakistan](https://www.pmd.gov.pk/)
-- Local emergency services
+| Resource | Link |
+|----------|------|
+| NDMA Pakistan | [ndma.gov.pk](https://ndma.gov.pk/) |
+| PMD Pakistan | [pmd.gov.pk](https://www.pmd.gov.pk/) |
+| Emergency Services | Local authorities |
 
 ---
 
 ## 🙏 Acknowledgments
 
-- NASA POWER for satellite data
-- Meteostat for weather data
-- NDMA Pakistan for flood reports
-- Streamlit for the web framework
-- scikit-learn for ML tools
+- **NASA POWER** — Satellite-derived meteorological data
+- **Meteostat** — Ground station weather data
+- **NDMA Pakistan** — Historical flood reports
+- **Streamlit** — Web application framework
+- **scikit-learn** — Machine learning tools
 
 ---
 
-<p align="center">
-  Made with ❤️ for CS351 - Artificial Intelligence
-</p>
+<div align="center">
+
+### 🌐 [Try the Live Demo](https://ai-based-natural-disaster-prediction.streamlit.app/)
+
+<br>
+
+**Made with ❤️ for CS351 - Artificial Intelligence**
+
+<br>
+
+[![Stars](https://img.shields.io/github/stars/zohaibkhan745/-AI-Based-Natural-Disaster-Prediction-Web-App-?style=social)](https://github.com/zohaibkhan745/-AI-Based-Natural-Disaster-Prediction-Web-App-)
+[![Forks](https://img.shields.io/github/forks/zohaibkhan745/-AI-Based-Natural-Disaster-Prediction-Web-App-?style=social)](https://github.com/zohaibkhan745/-AI-Based-Natural-Disaster-Prediction-Web-App-)
+
+</div>
